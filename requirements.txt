@@ -1,0 +1,15 @@
+pandas
+numpy
+scikit-learn
+xgboost
+mlflow
+fastapi
+uvicorn
+python-multipart
+imbalanced-learn
+requests
+streamlit
+prefect
+great-expectations
+pydantic
+joblib
