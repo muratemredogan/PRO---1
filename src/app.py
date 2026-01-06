@@ -27,9 +27,25 @@ monitor = get_monitor()
 
 def get_latest_model_physically():
     """
-    V3: Recursive Search.
-    Klasör derinliğine bakmaksızın 'MLmodel' dosyasını arar ve en yenisini bulur.
+    V4: Önce en son run'ı bul, sonra onun modelini yükle.
+    Bu, yeni eğitilen modellerin öncelikli olarak yüklenmesini sağlar.
     """
+    print(f"[INFO] En son run araniyor...")
+    
+    try:
+        from mlflow.tracking import MlflowClient
+        client = MlflowClient()
+        # En son run'ı bul
+        runs = client.search_runs(experiment_ids=['1'], order_by=['start_time desc'], max_results=1)
+        if runs:
+            latest_run = runs[0]
+            model_uri = f"runs:/{latest_run.info.run_id}/model"
+            print(f"[OK] En son run bulundu: {latest_run.info.run_id}")
+            return mlflow.sklearn.load_model(model_uri)
+    except Exception as e:
+        print(f"[WARNING] Run'dan model yuklenemedi, fiziksel arama yapiliyor: {e}")
+    
+    # Fallback: Fiziksel arama
     print(f"[INFO] Derinlemesine taranıyor: {MLRUNS_DIR}")
     
     # mlruns altındaki TÜM klasörlerde 'MLmodel' dosyasını ara
@@ -192,18 +208,25 @@ def prepare_features(input_data: Dict[str, Any], encoders: Dict, feature_order: 
                 df[col] = 0
     
     # 3. Modelin beklediği kolonları kontrol et ve sırala
-    # Önce feature_order dosyasından sırayı al, yoksa model'in feature_names_in_ özelliğini kullan
+    # ÖNCE feature_order.json'a bak (train.csv'den alınmış, en güvenilir)
+    # Sonra model'in feature_names_in_ özelliğini kontrol et
     if feature_order:
         required_cols = feature_order.copy()
-        # PDF ZORUNLULUĞU: Eğer feature_order'da JobRole varsa ama biz JobRole_Hash_* oluşturduysak,
-        # feature_order'ı güncelle (eski model uyumluluğu için)
+        # feature_order.json zaten JobRole_Hash_* içeriyor olmalı
+        # Ama eğer JobRole varsa ve biz JobRole_Hash_* oluşturduysak, güncelle
         if 'JobRole' in required_cols and 'JobRole_Hash_0' in df.columns:
             # JobRole'u JobRole_Hash_* ile değiştir
             jobrole_index = required_cols.index('JobRole')
             required_cols = required_cols[:jobrole_index] + [f'JobRole_Hash_{i}' for i in range(8)] + required_cols[jobrole_index+1:]
             print("[INFO] feature_order.json guncellendi: JobRole -> JobRole_Hash_0...7")
     elif hasattr(model, "feature_names_in_"):
-        required_cols = model.feature_names_in_
+        required_cols = list(model.feature_names_in_)
+        # Model JobRole bekliyorsa ama biz JobRole_Hash_* oluşturduysak, model'in beklediği listeyi güncelle
+        if 'JobRole' in required_cols and 'JobRole_Hash_0' in df.columns:
+            # JobRole'u JobRole_Hash_* ile değiştir
+            jobrole_index = required_cols.index('JobRole')
+            required_cols = required_cols[:jobrole_index] + [f'JobRole_Hash_{i}' for i in range(8)] + required_cols[jobrole_index+1:]
+            print("[INFO] Model feature_names guncellendi: JobRole -> JobRole_Hash_0...7")
     else:
         # Son çare: DataFrame'deki mevcut kolonları kullan (sıralı)
         required_cols = sorted(df.columns.tolist())
